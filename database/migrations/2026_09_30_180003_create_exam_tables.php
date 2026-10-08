@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -37,7 +38,13 @@ return new class extends Migration
         Schema::create('exam_attempts', function (Blueprint $table) {
             $table->id();
             $table->foreignId('exam_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('student_id')->constrained()->cascadeOnDelete();
+            // SQLite permits forward references, but PostgreSQL and MySQL do
+            // not. Add this FK in the later migration after students exists.
+            if (DB::connection()->getDriverName() === 'sqlite') {
+                $table->foreignId('student_id')->constrained()->cascadeOnDelete();
+            } else {
+                $table->unsignedBigInteger('student_id');
+            }
             $table->string('status')->default('in_progress'); // in_progress | completed
             $table->timestamp('started_at')->nullable();
             $table->timestamp('expires_at')->nullable();

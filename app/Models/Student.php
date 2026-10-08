@@ -34,6 +34,11 @@ class Student extends Model
         return $this->hasMany(ExamAttempt::class);
     }
 
+    public function referrals(): HasMany
+    {
+        return $this->hasMany(Referral::class, 'referrer_student_id');
+    }
+
     public function questionAttempts(): HasMany
     {
         return $this->hasMany(QuestionAttempt::class);

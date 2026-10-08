@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Subject extends Model
 {
-    protected $fillable = ['grade_id', 'name', 'description', 'order', 'is_active'];
+    protected $fillable = ['grade_id', 'name', 'language', 'description', 'order', 'is_active'];
 
     protected $casts = ['is_active' => 'boolean', 'order' => 'integer'];
 

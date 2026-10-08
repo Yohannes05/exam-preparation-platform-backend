@@ -15,6 +15,9 @@ class TelegramClient
     /** @var array<int, array{method:string, chat_id?:int, payload:array}> */
     public static array $sent = [];
 
+    /** @var array<int, array{chat_id:int, text:string, error:string}> */
+    public static array $failed = [];
+
     protected ?string $token;
 
     public function __construct()
@@ -27,6 +30,31 @@ class TelegramClient
         return config('telegram.mock') || empty($this->token);
     }
 
+    /** Resolve the bot username for deep links when it is not configured. */
+    public function getBotUsername(): ?string
+    {
+        if ($this->mock()) {
+            return null;
+        }
+
+        try {
+            $response = $this->call('getMe', [], true);
+            $username = $response['result']['username'] ?? null;
+
+            return is_string($username) && $username !== '' ? $username : null;
+        } catch (\Throwable $e) {
+            report($e);
+
+            return null;
+        }
+    }
+
+    /** @return array{ok:bool,result?:array,description?:string} */
+    public function getMe(): array
+    {
+        return $this->call('getMe', [], true);
+    }
+
     public function sendMessage(int $chatId, string $text, ?array $keyboard = null, bool $oneTime = false): void
     {
         $payload = [
@@ -36,7 +64,7 @@ class TelegramClient
             'disable_web_page_preview' => true,
         ];
 
-        if ($keyboard) {
+        if ($keyboard !== null) {
             $payload['reply_markup'] = ['inline_keyboard' => $keyboard];
         }
 
@@ -48,6 +76,7 @@ class TelegramClient
             } catch (\Throwable $e) {
                 if ($attempt === 3) {
                     self::$failed[] = ['chat_id' => $chatId, 'text' => mb_substr($text, 0, 40), 'error' => $e->getMessage()];
+                    report($e);
                     break;
                 }
                 // Telegram blacklists aggressively right after a success — back off
@@ -56,6 +85,80 @@ class TelegramClient
                 $backoff = min($backoff * 2, 10);
             }
         }
+    }
+
+    /** Send a screen with Telegram's keyboard below the message input. */
+    public function sendReplyMessage(int $chatId, string $text, ?array $keyboard = null): void
+    {
+        $payload = [
+            'chat_id' => $chatId,
+            'text' => $this->chunk($text),
+            'parse_mode' => 'HTML',
+            'disable_web_page_preview' => true,
+        ];
+
+        if ($keyboard !== null) {
+            $payload['reply_markup'] = [
+                'keyboard' => $keyboard,
+                'resize_keyboard' => true,
+                'is_persistent' => true,
+            ];
+        }
+
+        $this->call('sendMessage', $payload);
+    }
+
+    /** Send an existing Telegram photo by its file_id with an optional caption. */
+    public function sendPhoto(int $chatId, string $photo, ?string $caption = null, ?array $keyboard = null): void
+    {
+        $payload = ['chat_id' => $chatId, 'photo' => $photo];
+
+        if ($caption !== null && $caption !== '') {
+            $payload['caption'] = mb_substr($caption, 0, 1000);
+            $payload['parse_mode'] = 'HTML';
+        }
+        if ($keyboard !== null) {
+            $payload['reply_markup'] = ['inline_keyboard' => $keyboard];
+        }
+
+        $this->call('sendPhoto', $payload);
+    }
+
+    /** Send an existing Telegram document by its file_id. */
+    public function sendDocument(int $chatId, string $document, ?string $caption = null): void
+    {
+        $payload = ['chat_id' => $chatId, 'document' => $document];
+
+        if ($caption !== null && $caption !== '') {
+            $payload['caption'] = mb_substr($caption, 0, 1000);
+            $payload['parse_mode'] = 'HTML';
+        }
+
+        $this->call('sendDocument', $payload);
+    }
+
+    /** Download a private Telegram file without exposing the bot token to the admin UI. */
+    public function downloadFile(string $fileId): ?array
+    {
+        if ($this->mock()) {
+            return null;
+        }
+
+        $file = $this->call('getFile', ['file_id' => $fileId], true);
+        $path = $file['result']['file_path'] ?? null;
+        if (! is_string($path) || $path === '' || str_contains($path, '..')) {
+            throw new \RuntimeException('Telegram did not return a valid receipt file.');
+        }
+
+        $response = Http::timeout(20)->get(
+            rtrim(config('telegram.api_base'), '/').'/file/bot'.$this->token.'/'.ltrim($path, '/')
+        );
+        $response->throw();
+
+        return [
+            'contents' => $response->body(),
+            'mime' => $response->header('Content-Type') ?: 'application/octet-stream',
+        ];
     }
 
     /** Send text as sequential messages when longer than Telegram's 4096 limit. */
@@ -93,15 +196,25 @@ class TelegramClient
         $this->call('answerCallbackQuery', $payload);
     }
 
-    public function setWebhook(string $url, ?string $secret = null): array
+    public function setWebhook(string $url, ?string $secret = null, bool $dropPending = false): array
     {
-        $payload = ['url' => $url, 'drop_pending_updates' => true];
+        $payload = ['url' => $url, 'drop_pending_updates' => $dropPending];
 
         if ($secret) {
             $payload['secret_token'] = $secret;
         }
 
         return $this->call('setWebhook', $payload, true);
+    }
+
+    public function getWebhookInfo(): array
+    {
+        return $this->call('getWebhookInfo', [], true);
+    }
+
+    public function deleteWebhook(bool $dropPending = false): array
+    {
+        return $this->call('deleteWebhook', ['drop_pending_updates' => $dropPending], true);
     }
 
     /**
@@ -116,14 +229,25 @@ class TelegramClient
             return [];
         }
 
-        $response = Http::timeout($timeout + 15)
-            ->get(config('telegram.api_base').'/bot'.$this->token.'/getUpdates', [
-                'offset' => $offset,
-                'timeout' => $timeout,
-                'allowed_updates' => ['message', 'callback_query'],
-            ])->json() ?? [];
+        try {
+            $response = Http::timeout($timeout + 15)
+                ->get(config('telegram.api_base').'/bot'.$this->token.'/getUpdates', [
+                    'offset' => $offset,
+                    'timeout' => $timeout,
+                    'allowed_updates' => json_encode(['message', 'callback_query'], JSON_THROW_ON_ERROR),
+                ]);
 
-        return $response['result'] ?? [];
+            $response->throw();
+            $body = $response->json() ?? [];
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->safeTelegramError('getUpdates', $e->getMessage()));
+        }
+
+        if (! ($body['ok'] ?? false)) {
+            throw new \RuntimeException($body['description'] ?? 'Telegram getUpdates request failed.');
+        }
+
+        return $body['result'] ?? [];
     }
 
     /** Check if a user is a member of the bot's channel (spec §1, §4).
@@ -132,7 +256,7 @@ class TelegramClient
     public function checkChannelMembership(int $telegramId): bool
     {
         // The bot must be an admin of the channel to check membership.
-        // This does a lightweight API call; mock mode returns false (no channel check).
+        // Mock mode deliberately allows local development without Telegram access.
         if ($this->mock()) {
             return true; // Mock mode: allow freediving, admin verifies later.
         }
@@ -140,16 +264,21 @@ class TelegramClient
         try {
             $response = Http::timeout(10)->get(
                 config('telegram.api_base').'/bot'.$this->token.'/getChatMember',
-                ['chat_id' => '@'.(config('telegram.channel_username', 'exitexamprep') ?? 'exitexamprep'), 'user_id' => $telegramId]
+                ['chat_id' => '@'.ltrim((string) config('telegram.channel_username', 'exitexamprep'), '@'), 'user_id' => $telegramId]
             );
 
             $data = $response->json();
-            if (! $data['ok'] ?? false) {
+            if (! ($data['ok'] ?? false)) {
                 return false;
             }
 
             $member = $data['result'] ?? null;
-            return $member['status'] === 'member';
+            if (! is_array($member)) {
+                return false;
+            }
+
+            return in_array($member['status'] ?? null, ['creator', 'administrator', 'member'], true)
+                || (($member['status'] ?? null) === 'restricted' && ($member['is_member'] ?? false));
         } catch (\Throwable $e) {
             return false;
         }
@@ -164,18 +293,46 @@ class TelegramClient
             return ['ok' => true, 'result' => []];
         }
 
-        $response = Http::asForm()
-            ->timeout(15)
-            ->post(config('telegram.api_base').'/bot'.$this->token.'/'.$method, $payload)
-            ->json() ?? ['ok' => false, 'description' => 'no response'];
+        try {
+            $requestPayload = $payload;
+            if (isset($requestPayload['reply_markup']) && is_array($requestPayload['reply_markup'])) {
+                $requestPayload['reply_markup'] = json_encode(
+                    $requestPayload['reply_markup'],
+                    JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR
+                );
+            }
 
-        return $return ? $response : [];
+            $response = Http::asForm()
+                ->timeout(15)
+                ->post(config('telegram.api_base').'/bot'.$this->token.'/'.$method, $requestPayload);
+
+            $response->throw();
+            $body = $response->json() ?? ['ok' => false, 'description' => 'Telegram returned an empty response.'];
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->safeTelegramError($method, $e->getMessage()));
+        }
+
+        if (! ($body['ok'] ?? false)) {
+            throw new \RuntimeException('Telegram '.$method.' failed: '.($body['description'] ?? 'unknown API error'));
+        }
+
+        return $body;
+    }
+
+    protected function safeTelegramError(string $method, string $message): string
+    {
+        if ($this->token) {
+            $message = str_replace('bot'.$this->token, 'bot[REDACTED]', $message);
+        }
+
+        return 'Telegram '.$method.' request failed: '.$message;
     }
 
     /** Test helper: reset the recorded call log. */
     public static function reset(): void
     {
         self::$sent = [];
+        self::$failed = [];
     }
 
     /** Recorded outgoing messages (chat_id => texts), for assertions. */

@@ -2,7 +2,11 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CrudController;
+use App\Http\Controllers\ChapterNotesController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\AnnouncementController;
+use App\Http\Controllers\PaymentController;
+use App\Http\Controllers\QuestionImportController;
 use App\Http\Controllers\ResultController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\TelegramWebhookController;
@@ -16,7 +20,7 @@ use Illuminate\Support\Facades\Route;
 | exams, announcements) are served by the config-driven CrudController.
 */
 
-Route::post('/login', [AuthController::class, 'login']);
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
@@ -28,7 +32,22 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/students/{id}', [StudentController::class, 'show']);
     Route::patch('/students/{id}', [StudentController::class, 'update']);
 
+    Route::get('/payments', [PaymentController::class, 'index']);
+    Route::get('/payments/{id}/receipt', [PaymentController::class, 'receipt'])->whereNumber('id');
+    Route::post('/payments/{id}/approve', [PaymentController::class, 'approve'])->whereNumber('id');
+    Route::post('/payments/{id}/reject', [PaymentController::class, 'reject'])->whereNumber('id');
+
+    Route::post('/questions/import/preview', [QuestionImportController::class, 'preview']);
+    Route::post('/questions/import/commit', [QuestionImportController::class, 'commit']);
+
+    Route::post('/announcements/publish', [AnnouncementController::class, 'publish']);
+
+    Route::post('/chapters/{chapter}/publish-notes', [ChapterNotesController::class, 'publish'])->whereNumber('chapter');
+    Route::post('/chapters/{chapter}/pdf', [ChapterNotesController::class, 'uploadPdf'])->whereNumber('chapter');
+    Route::delete('/chapters/{chapter}/pdf', [ChapterNotesController::class, 'deletePdf'])->whereNumber('chapter');
+
     Route::get('/results', [ResultController::class, 'index']);
+    Route::get('/results/practice', [ResultController::class, 'practice']);
     Route::get('/results/{id}', [ResultController::class, 'show']);
 
     // Content resources share the config-driven CRUD controller:

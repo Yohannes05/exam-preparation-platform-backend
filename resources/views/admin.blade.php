@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title', 'Admin') · {{ config('app.name', 'Laravel') }}</title>
-    <link rel="stylesheet" href="{{ asset('admin-assets/app.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/app.css') }}">
 </head>
 <body>
-    <div id="app" class="app-root">
+    <div id="app" class="app">
         <div class="boot-loading">Loading…</div>
     </div>
-    <div id="toast-holder" class="toast-holder" aria-live="polite"></div>
-    <script src="{{ asset('admin-assets/app.js') }}"></script>
+    <div class="toast-holder" aria-live="polite"></div>
+    <script src="{{ asset('js/admin.js') }}" defer></script>
 </body>
 </html>

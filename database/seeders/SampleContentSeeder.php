@@ -31,18 +31,22 @@ class SampleContentSeeder extends Seeder
         }
 
         $subjectsByGrade = [
-            6 => ['Mathematics', 'English', 'Amharic', 'Environmental Science'],
-            8 => ['Mathematics', 'Physics', 'Biology', 'English'],
-            12 => ['Mathematics', 'Physics', 'Chemistry', 'Biology'],
+            6 => ['Mathematics', 'English', 'Amharic', 'Environmental Science', 'General Science', 'Civics'],
+            8 => ['Mathematics', 'Physics', 'Biology', 'English', 'Amharic'],
+            12 => ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'Amharic'],
         ];
 
         foreach ($subjectsByGrade as $level => $subjects) {
             $grade = Grade::where('level', $level)->first();
 
             foreach ($subjects as $i => $name) {
-                Subject::firstOrCreate(
+                $language = $name === 'Amharic' || ($level === 6 && in_array($name, ['General Science', 'Civics'], true))
+                    ? 'am'
+                    : 'en';
+
+                Subject::updateOrCreate(
                     ['grade_id' => $grade->id, 'name' => $name],
-                    ['order' => $i + 1]
+                    ['language' => $language, 'order' => $i + 1]
                 );
             }
         }
@@ -68,7 +72,7 @@ class SampleContentSeeder extends Seeder
             foreach ($chapters as $i => $title) {
                 $chapter = Chapter::firstOrCreate(
                     ['subject_id' => $math->id, 'title' => $title],
-                    ['order' => $i + 1, 'description' => "Sample chapter: $title"]
+                    ['order' => $i + 1, 'description' => "Sample chapter: $title", 'requires_activation' => $i >= 3]
                 );
 
                 Topic::firstOrCreate(
@@ -96,7 +100,7 @@ class SampleContentSeeder extends Seeder
             foreach ($chapters as $i => $title) {
                 Chapter::firstOrCreate(
                     ['subject_id' => $physics->id, 'title' => $title],
-                    ['order' => $i + 1, 'description' => "Sample chapter: $title"]
+                    ['order' => $i + 1, 'description' => "Sample chapter: $title", 'requires_activation' => $i >= 3]
                 );
             }
         }

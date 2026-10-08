@@ -18,6 +18,8 @@ class TelegramWebhookController extends Controller
     {
         $secret = config('telegram.secret');
 
+        abort_if(app()->isProduction() && ! $secret, 503, 'Telegram webhook secret is not configured.');
+
         if ($secret) {
             abort_unless(
                 $request->header('X-Telegram-Bot-Api-Secret-Token') === $secret,

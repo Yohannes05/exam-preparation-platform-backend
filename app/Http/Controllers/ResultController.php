@@ -3,11 +3,27 @@
 namespace App\Http\Controllers;
 
 use App\Models\ExamAttempt;
+use App\Models\QuestionAttempt;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class ResultController extends Controller
 {
+    /** GET /api/results/practice — individual answers to practice questions. */
+    public function practice(Request $request): JsonResponse
+    {
+        $attempts = QuestionAttempt::with([
+            'student.grade',
+            'question.chapter',
+            'question.subject',
+            'question.options',
+        ])->whereNull('exam_attempt_id')
+            ->latest('answered_at')
+            ->paginate(min((int) $request->input('per_page', 15), 100));
+
+        return response()->json($attempts);
+    }
+
     /** GET /api/v1/results — completed exam attempts with filters. */
     public function index(Request $request): JsonResponse
     {

@@ -8,9 +8,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Chapter extends Model
 {
-    protected $fillable = ['subject_id', 'title', 'description', 'order', 'is_active'];
+    protected $fillable = ['subject_id', 'title', 'description', 'order', 'is_active', 'requires_activation', 'telegraph_url', 'telegraph_path', 'pdf_file'];
 
-    protected $casts = ['is_active' => 'boolean', 'order' => 'integer'];
+    protected $casts = ['is_active' => 'boolean', 'requires_activation' => 'boolean', 'order' => 'integer'];
 
     public function subject(): BelongsTo
     {

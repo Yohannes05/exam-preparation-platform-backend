@@ -7,6 +7,7 @@ use App\Models\ExamAttempt;
 use App\Models\Grade;
 use App\Models\Student;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class DashboardAndResultsTest extends TestCase
@@ -33,6 +34,17 @@ class DashboardAndResultsTest extends TestCase
             ->assertJsonStructure([
                 'students' => ['total', 'active', 'new_this_week'],
                 'content' => ['questions', 'announcements'],
+                'inventory' => [
+                    'grades' => ['total', 'available'],
+                    'subjects' => ['total', 'available'],
+                    'chapters' => ['total', 'available'],
+                    'notes' => ['total', 'available'],
+                    'questions' => ['total', 'available'],
+                    'topics' => ['total', 'available'],
+                    'exams' => ['total', 'available'],
+                    'students' => ['total', 'available'],
+                    'results' => ['total', 'available'],
+                ],
                 'activity' => ['questions_answered', 'accuracy', 'mock_exams_completed'],
                 'popular_subjects',
                 'difficult_questions',
@@ -64,6 +76,23 @@ class DashboardAndResultsTest extends TestCase
             ->getJson("/api/students/{$student->id}")
             ->assertOk()
             ->assertJsonStructure(['student', 'progress' => ['questions_answered', 'accuracy', 'by_subject'], 'mistakes', 'attempts']);
+    }
+
+    public function test_admin_can_revoke_a_student_activation(): void
+    {
+        Http::fake();
+        $student = Student::create([
+            'telegram_id' => 333,
+            'first_name' => 'Activated',
+            'activated_until' => now()->addDays(20),
+        ]);
+
+        $this->withToken($this->token)
+            ->patchJson("/api/students/{$student->id}", ['revoke_activation' => true])
+            ->assertOk()
+            ->assertJsonPath('activated_until', null);
+
+        $this->assertNull($student->fresh()->activated_until);
     }
 
     public function test_results_listing_and_detail(): void

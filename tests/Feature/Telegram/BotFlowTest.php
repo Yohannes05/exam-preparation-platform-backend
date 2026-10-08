@@ -10,6 +10,9 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Services\Telegram\TelegramClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -79,17 +82,13 @@ class BotFlowTest extends TestCase
 
         $last = end($calls);
 
-        return $last['payload']['reply_markup']['inline_keyboard'] ?? [];
+        return $last['payload']['reply_markup']['keyboard'] ?? [];
     }
 
     protected function keyboardCallbacks(): array
     {
-        return collect($this->lastKeyboard())
-            ->flatten(1)
-            ->filter(fn ($btn) => isset($btn['callback_data']))
-            ->pluck('callback_data')
-            ->values()
-            ->all();
+        $actions = Cache::get('telegram.reply_keyboard.'.self::CHAT, []);
+        return array_values($actions);
     }
 
     protected function botSession(): BotSession
@@ -116,7 +115,19 @@ class BotFlowTest extends TestCase
         // /start registers the student and asks for a grade (spec §24).
         $this->type('/start')->assertOk();
         $this->assertStringContainsString('Welcome', $this->lastMessage());
-        $this->assertEquals('choose_grade', $this->botSession()->state);
+        $this->assertContains('g:'.Grade::where('level', 6)->value('id'), $this->keyboardCallbacks());
+        $this->assertContains('g:'.Grade::where('level', 8)->value('id'), $this->keyboardCallbacks());
+        $this->assertContains('g:'.Grade::where('level', 12)->value('id'), $this->keyboardCallbacks());
+        $this->assertContains('howto', $this->keyboardCallbacks());
+        $this->assertContains('activate', $this->keyboardCallbacks());
+        $this->assertContains('leaderboard', $this->keyboardCallbacks());
+        $this->assertContains('notice', $this->keyboardCallbacks());
+        $this->assertContains('help', $this->keyboardCallbacks());
+        $this->assertContains('contact', $this->keyboardCallbacks());
+        foreach ($this->lastKeyboard() as $row) {
+            $this->assertTrue(array_is_list($row), 'Every inline keyboard row must encode as a JSON array.');
+        }
+        $this->assertEquals('menu', $this->botSession()->state);
 
         $student = Student::where('telegram_id', self::CHAT)->first();
         $this->assertNotNull($student);
@@ -125,35 +136,87 @@ class BotFlowTest extends TestCase
         // Pick Grade 8.
         $g8 = Grade::where('level', 8)->first();
         $this->tap("g:{$g8->id}")->assertOk();
-        $this->assertEquals('menu', $this->botSession()->state);
         $this->assertEquals($g8->id, $student->fresh()->grade_id);
-        $this->assertStringContainsString("all set for <b>Grade 8</b>", $this->lastMessage());
 
-        // Menu offers everything from the spec (§3).
-        $this->assertContains('mode:study', $this->keyboardCallbacks());
-        $this->assertContains('mode:practice', $this->keyboardCallbacks());
-        $this->assertContains('mode:test', $this->keyboardCallbacks());
-        $this->assertContains('mode:mock', $this->keyboardCallbacks());
-        $this->assertContains('progress', $this->keyboardCallbacks());
-        $this->assertContains('mistakes', $this->keyboardCallbacks());
-
-        // Study: subject → chapter → notes → read a note.
-        $this->tap('mode:study');
+        // Choosing a grade opens the spec's subject list.
+        $this->assertEquals('choose_subject', $this->botSession()->state);
+        $this->assertStringContainsString('Choose a subject', $this->lastMessage());
         $math = Subject::where('grade_id', $g8->id)->where('name', 'Mathematics')->first();
         $this->tap("s:{$math->id}");
 
         $linear = $math->chapters()->where('title', 'Linear Equations')->first();
-        $this->tap("c:{$linear->id}");
-        $this->assertEquals('study_notes', $this->botSession()->state);
-        $this->assertStringContainsString('Select study notes', $this->lastMessage());
-
-        $noteId = collect($this->keyboardCallbacks())
-            ->first(fn ($c) => str_starts_with($c, 'n:'));
-        $this->assertNotNull($noteId);
-
-        $this->tap($noteId);
+        $this->assertContains("chapter_notes:{$linear->id}", $this->keyboardCallbacks());
+        $this->assertContains("chapter_quiz:{$linear->id}", $this->keyboardCallbacks());
+        $this->assertContains('practice_questions', $this->keyboardCallbacks());
+        $this->tap("chapter_notes:{$linear->id}");
         $this->assertStringContainsString('Linear Equations', $this->lastMessage());
         $this->assertStringContainsString('Isolate the variable', $this->lastMessage());
+    }
+
+    public function test_telegram_client_json_encodes_inline_keyboards_in_form_requests(): void
+    {
+        config([
+            'telegram.token' => 'test-bot-token',
+            'telegram.mock' => false,
+            'telegram.api_base' => 'https://api.telegram.test',
+        ]);
+        Http::fake(['api.telegram.test/*' => Http::response(['ok' => true, 'result' => []])]);
+
+        app(TelegramClient::class)->sendMessage(123, 'Choose your grade', [
+            [['text' => 'Grade 6', 'callback_data' => 'g:1']],
+        ]);
+
+        Http::assertSent(function (Request $request): bool {
+            $markup = $request->data()['reply_markup'] ?? null;
+            $decoded = is_string($markup) ? json_decode($markup, true) : null;
+
+            return str_ends_with($request->url(), '/sendMessage')
+                && ($decoded['inline_keyboard'][0][0]['callback_data'] ?? null) === 'g:1';
+        });
+    }
+
+    public function test_telegram_client_sends_reply_keyboard_below_input(): void
+    {
+        config([
+            'telegram.token' => 'test-bot-token',
+            'telegram.mock' => false,
+            'telegram.api_base' => 'https://api.telegram.test',
+        ]);
+        Http::fake(['api.telegram.test/*' => Http::response(['ok' => true, 'result' => []])]);
+
+        app(TelegramClient::class)->sendReplyMessage(123, 'Welcome', [[['text' => 'Grade 8']]]);
+
+        Http::assertSent(function (Request $request): bool {
+            $markup = $request->data()['reply_markup'] ?? null;
+            $decoded = is_string($markup) ? json_decode($markup, true) : null;
+
+            return str_ends_with($request->url(), '/sendMessage')
+                && ($decoded['keyboard'][0][0]['text'] ?? null) === 'Grade 8'
+                && ($decoded['resize_keyboard'] ?? false) === true;
+        });
+    }
+
+    public function test_student_can_choose_grade_by_text_when_inline_keyboard_is_unavailable(): void
+    {
+        $this->type('/start');
+        $this->type('Grade 8')->assertOk();
+
+        $this->assertSame('choose_subject', $this->botSession()->state);
+        $this->assertSame(8, Student::where('telegram_id', self::CHAT)->first()->grade->level);
+    }
+
+    public function test_reply_keyboard_button_below_input_runs_its_bot_action(): void
+    {
+        $this->type('/start')->assertOk();
+        $grade8 = Grade::where('level', 8)->first();
+        $actions = Cache::get('telegram.reply_keyboard.'.self::CHAT, []);
+        $buttonText = array_search('g:'.$grade8->id, $actions, true);
+
+        $this->assertIsString($buttonText);
+        $this->type($buttonText)->assertOk();
+
+        $this->assertSame('choose_subject', $this->botSession()->state);
+        $this->assertSame($grade8->id, Student::where('telegram_id', self::CHAT)->first()->grade_id);
     }
 
     public function test_practice_flow_gives_immediate_feedback(): void
@@ -204,6 +267,62 @@ class BotFlowTest extends TestCase
         $this->assertStringContainsString('Your progress', $this->lastMessage());
         $this->assertStringContainsString('Answered: <b>3</b>', $this->lastMessage());
         $this->assertStringContainsString('Accuracy: <b>100.0%</b>', $this->lastMessage());
+    }
+
+    public function test_first_three_chapter_quizzes_are_free_and_chapter_four_requires_activation(): void
+    {
+        $this->type('/start');
+        $grade = Grade::where('level', 8)->first();
+        $this->tap('g:'.$grade->id);
+        $subject = Subject::where('grade_id', $grade->id)->where('name', 'Mathematics')->first();
+        $this->tap('s:'.$subject->id);
+
+        $chapters = $subject->chapters()->where('is_active', true)->orderBy('order')->orderBy('id')->get();
+        $third = $chapters[2];
+        $fourth = $chapters[3];
+        $chapterLabels = collect($this->lastKeyboard())->flatten(1)->pluck('text')->all();
+        $this->assertContains('Chapter 3 · Quiz (10 Q)', $chapterLabels);
+        $this->assertContains('🔒 Chapter 4 · Notes', $chapterLabels);
+        $this->assertContains('🔒 Chapter 4 · Quiz (10 Q)', $chapterLabels);
+        $question = Question::create([
+            'grade_id' => $grade->id,
+            'subject_id' => $subject->id,
+            'chapter_id' => $third->id,
+            'question_text' => 'Free chapter sample question?',
+            'question_type' => 'multiple_choice',
+            'difficulty' => 'easy',
+            'is_active' => true,
+        ]);
+        $question->options()->createMany([
+            ['label' => 'A', 'text' => 'Correct', 'is_correct' => true],
+            ['label' => 'B', 'text' => 'Wrong', 'is_correct' => false],
+        ]);
+
+        $this->tap('chapter_quiz:'.$third->id);
+        $this->assertSame('practice', $this->botSession()->state);
+        $this->assertStringContainsString('Free chapter sample question?', $this->lastMessage());
+
+        $this->tap('chapter_quiz:'.$fourth->id);
+        $this->assertStringContainsString('Chapter 4 quiz requires activation', $this->lastMessage());
+        $this->assertContains('activate', $this->keyboardCallbacks());
+
+        Student::where('telegram_id', self::CHAT)->first()->update(['activated_until' => now()->addDays(30)]);
+        $fourthQuestion = Question::create([
+            'grade_id' => $grade->id,
+            'subject_id' => $subject->id,
+            'chapter_id' => $fourth->id,
+            'question_text' => 'Paid chapter sample question?',
+            'question_type' => 'multiple_choice',
+            'difficulty' => 'easy',
+            'is_active' => true,
+        ]);
+        $fourthQuestion->options()->createMany([
+            ['label' => 'A', 'text' => 'Correct', 'is_correct' => true],
+            ['label' => 'B', 'text' => 'Wrong', 'is_correct' => false],
+        ]);
+        $this->tap('chapter_quiz:'.$fourth->id);
+        $this->assertSame('practice', $this->botSession()->state);
+        $this->assertStringContainsString('Paid chapter sample question?', $this->lastMessage());
     }
 
     public function test_wrong_answer_lands_in_mistake_review(): void
@@ -322,6 +441,7 @@ class BotFlowTest extends TestCase
         // Mock exam path: menu → mock → physics → chapter → exam.
         $physics = Subject::where('grade_id', $g8->id)->where('name', 'Physics')->first();
         $motion = $physics->chapters()->where('title', 'Motion')->first();
+        Student::where('telegram_id', self::CHAT)->first()->update(['activated_until' => now()->addDays(30)]);
 
         $this->tap('mode:mock');
         $this->tap("s:{$physics->id}");

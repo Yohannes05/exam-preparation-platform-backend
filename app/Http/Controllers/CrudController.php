@@ -20,10 +20,23 @@ class CrudController extends Controller
     {
         $config = $this->config($resource);
         $query = $config['model']::query()->with($config['with'] ?? []);
+        if (! empty($config['withCount'])) {
+            $query->withCount($config['withCount']);
+        }
 
         foreach ($config['filters'] ?? [] as $filter) {
             if ($request->filled($filter)) {
-                $query->where($filter, $request->input($filter));
+                if ($filter === 'grade_id' && $resource === 'chapters') {
+                    $query->whereHas('subject', fn ($subject) => $subject->where('grade_id', $request->integer($filter)));
+                } elseif ($filter === 'grade_id' && $resource === 'topics') {
+                    $query->whereHas('chapter.subject', fn ($subject) => $subject->where('grade_id', $request->integer($filter)));
+                } elseif ($filter === 'subject_id' && $resource === 'topics') {
+                    $query->whereHas('chapter', fn ($chapter) => $chapter->where('subject_id', $request->integer($filter)));
+                } elseif ($resource === 'questions' && $filter === 'source') {
+                    $query->where($filter, 'like', '%'.$request->input($filter).'%');
+                } else {
+                    $query->where($filter, $request->input($filter));
+                }
             }
         }
 
@@ -53,6 +66,10 @@ class CrudController extends Controller
         $config = $this->config($resource);
         $data = $this->validateData($request, $config);
         $this->validateUniqueTuples($request, $config, null);
+
+        if ($resource === 'subjects') {
+            $data['language'] ??= 'en';
+        }
 
         $this->beforeSave($resource, $data, $request);
 

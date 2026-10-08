@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Student;
 use App\Services\ProgressService;
+use App\Services\Telegram\TelegramClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -12,7 +13,11 @@ class StudentController extends Controller
     /** GET /api/v1/students — list with grade and accuracy aggregates. */
     public function index(Request $request): JsonResponse
     {
-        $query = Student::with('grade')->withCount('questionAttempts')->orderByDesc('id');
+        $query = Student::with('grade')->withCount([
+            'questionAttempts',
+            'referrals',
+            'referrals as qualified_referrals_count' => fn ($referrals) => $referrals->whereNotNull('qualified_at'),
+        ])->orderByDesc('id');
 
         if ($request->filled('search')) {
             $term = '%'.$request->input('search').'%';
@@ -63,16 +68,39 @@ class StudentController extends Controller
     }
 
     /** PATCH /api/v1/students/{id} — admin edit (activate, change grade). */
-    public function update(Request $request, int $id): JsonResponse
+    public function update(Request $request, int $id, TelegramClient $telegram): JsonResponse
     {
         $student = Student::findOrFail($id);
 
         $data = $request->validate([
             'grade_id' => 'nullable|exists:grades,id',
             'is_active' => 'boolean',
+            'activate_for_days' => 'nullable|integer|in:30',
+            'revoke_activation' => 'nullable|boolean',
         ]);
 
+        $revokeActivation = (bool) ($data['revoke_activation'] ?? false);
+        unset($data['revoke_activation']);
+
+        if ($revokeActivation) {
+            $data['activated_until'] = null;
+            unset($data['activate_for_days']);
+        } elseif (isset($data['activate_for_days'])) {
+            $startsAt = $student->activated_until?->isFuture() ? $student->activated_until : now();
+            $data['activated_until'] = $startsAt->copy()->addDays($data['activate_for_days']);
+            unset($data['activate_for_days']);
+        }
+
         $student->update($data);
+
+        if (array_key_exists('activated_until', $data)) {
+            $message = $student->activated_until
+                ? '✅ Your account is active until <b>'
+                    .e($student->activated_until->timezone('Africa/Addis_Ababa')->format('M j, Y'))
+                    .'</b>. You can now use unlimited questions.'
+                : 'Your account activation has ended. Free access is still available.';
+            $telegram->sendMessage((int) $student->telegram_id, $message);
+        }
 
         return response()->json($student->fresh('grade'));
     }

@@ -6,6 +6,7 @@ use App\Models\ExamAttempt;
 use App\Models\Mistake;
 use App\Models\Question;
 use App\Models\QuestionAttempt;
+use App\Models\Score;
 use App\Models\Student;
 
 /**
@@ -160,55 +161,68 @@ class ProgressService
             ->get();
     }
 
-    /** Rank of $student among all students by weekly score (1-based, or null). */
+    /** Award one point per correct answer to the weekly and lifetime totals. */
+    public function awardQuizPoints(Student $student, int $points): void
+    {
+        if ($points <= 0) {
+            return;
+        }
+
+        $weekId = (int) now('Africa/Addis_Ababa')->format('oW');
+        $score = Score::firstOrCreate(
+            ['student_id' => $student->id, 'week_id' => $weekId],
+            ['weekly_points' => 0, 'total_points' => 0]
+        );
+        $score->increment('weekly_points', $points);
+        $score->increment('total_points', $points);
+    }
+
+    public function weeklyScore(Student $student): int
+    {
+        return (int) Score::where('student_id', $student->id)
+            ->where('week_id', (int) now('Africa/Addis_Ababa')->format('oW'))
+            ->sum('weekly_points');
+    }
+
+    public function allTimeScore(Student $student): int
+    {
+        return (int) Score::where('student_id', $student->id)->sum('total_points');
+    }
+
+    /** Rank of $student among students in their grade by weekly points. */
     public function weeklyRank(Student $student): ?int
     {
-        return $this->rankOf(
-            $student,
-            closed: false,
-            where: fn ($q) => $q
-                ->where('exam_attempts.status', 'completed')
-                ->where('exam_attempts.started_at', '>=', now()->subWeek()),
-        );
+        return $this->rankOf($student, weekly: true);
     }
 
-    /** Rank of $student among all students by all-time score (1-based, or null). */
+    /** Rank of $student among students in their grade by lifetime points. */
     public function allTimeRank(Student $student): ?int
     {
-        return $this->rankOf($student, closed: false, where: fn ($q) => $q);
+        return $this->rankOf($student, weekly: false);
     }
 
-    /** 1-based rank of $student among students with completed exams in scope.
-     *  Competition ranking: students with the same score share a rank.
-     *  Returns null when $student has no completed attempts in scope.
-     */
-    protected function rankOf(Student $student, bool $closed, callable $where): ?int
+    /** Competition rank: one plus the number of classmates with higher points. */
+    protected function rankOf(Student $student, bool $weekly): ?int
     {
-        $ranked = Student::query()
-            ->join('exam_attempts', 'exam_attempts.student_id', '=', 'students.id')
-            ->where('exam_attempts.status', 'completed')
-            ->when(!$closed, fn ($q) => $q->where('exam_attempts.started_at', '>=', now()->subWeek()))
-            ->select('students.id', 'exam_attempts.score')
-            ->pluck('score', 'id');
-
-        $studentScore = $ranked->get($student->id);
-
-        if ($studentScore === null) {
+        if (! $student->grade_id) {
             return null;
         }
 
-        // Competition ranking: students with a strictly higher score rank above;
-        // ties share the same rank.
-        $rank = 1;
-        foreach ($ranked as $id => $score) {
-            if ($id === $student->id) {
-                break;
-            }
-            if ($score > $studentScore) {
-                $rank++;
-            }
+        $pointsColumn = $weekly ? 'weekly_points' : 'total_points';
+        $scores = Score::query()
+            ->join('students', 'students.id', '=', 'scores.student_id')
+            ->where('students.grade_id', $student->grade_id)
+            ->when($weekly, fn ($q) => $q->where('scores.week_id', (int) now('Africa/Addis_Ababa')->format('oW')))
+            ->selectRaw('scores.student_id, SUM(scores.'.$pointsColumn.') as points')
+            ->groupBy('scores.student_id')
+            ->get()
+            ->keyBy('student_id');
+
+        $studentPoints = (int) ($scores->get($student->id)->points ?? 0);
+        if ($studentPoints === 0) {
+            return null;
         }
 
-        return $rank;
+        return 1 + $scores->filter(fn ($row) => (int) $row->points > $studentPoints)->count();
     }
 }

@@ -2,6 +2,10 @@
 
 return [
 
+    'telegraph' => [
+        'access_token' => env('TELEGRAPH_ACCESS_TOKEN'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

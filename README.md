@@ -1,58 +1,106 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Telegram Quiz Bot
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Laravel application for the admin dashboard and the Telegram student bot. The admin manages grades, subjects, chapters, notes, questions, exams, announcements, students, results, payments, and activation. Students use Telegram for registration, practice, quizzes, referrals, and account activation.
 
-## About Laravel
+## Requirements
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- PHP 8.3 or later with the extensions required by Laravel, including PDO SQLite/MySQL/PostgreSQL, fileinfo, and DOM.
+- Composer 2.
+- Node.js 22.12 or later for Vite 8 (`.nvmrc` pins the minimum compatible release).
+- MySQL/PostgreSQL for a typical production deployment, or a persistent SQLite volume.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Local setup
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+```sh
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate --seed
+php artisan admin:create admin@example.com "Admin Name"
+php artisan storage:link
+npm ci
+npm run build
+php artisan serve
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+The local seeder adds sample curriculum, but does not create an admin with a default password. `admin:create` prompts for the admin password. Add the Telegram and Telegraph settings listed below to `.env` to connect external services.
 
-## Contributing
+## Production deployment
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+1. Create a Supabase project. In its Dashboard, choose **Connect** and copy the PostgreSQL connection details. Use the direct connection if the application host supports IPv6; for an IPv4-only host choose the **Session pooler** details. Set the values in the server's environment (not in Git):
 
-## Code of Conduct
+   ```env
+   DB_CONNECTION=pgsql
+   DB_HOST=host-from-supabase-connect
+   DB_PORT=5432
+   DB_DATABASE=postgres
+   DB_USERNAME=username-from-supabase-connect
+   DB_PASSWORD=your-database-password
+   DB_SSLMODE=require
+   ```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+   Supabase connection host, port, and username vary by project and connection mode; copy them from the dashboard. If the password contains reserved URL characters and you use `DB_URL`, URL-encode the password. [Supabase connection guide](https://supabase.com/docs/guides/database/connecting-to-postgres)
 
-## Security Vulnerabilities
+2. Use a public HTTPS domain and set production environment values. Keep `.env` outside version control and never expose bot, Telegraph, database, or app secrets.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+   ```env
+   APP_ENV=production
+   APP_DEBUG=false
+   APP_URL=https://your-domain.example
+   TELEGRAM_BOT_TOKEN=...
+   TELEGRAM_WEBHOOK_SECRET=... # generate with: php -r 'echo bin2hex(random_bytes(32)), PHP_EOL;'
+   TELEGRAM_ADMIN_CHAT_ID=...
+   TELEGRAPH_ACCESS_TOKEN=...
+   ```
 
-## License
+   Configure the channel, payment details, and database connection as needed. Use a durable database and storage volume. The scheduler and uploaded chapter PDFs need writable persistent storage.
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+3. Install dependencies and build assets with Node.js 22.12 or later:
+
+   ```sh
+   composer install --no-dev --prefer-dist --optimize-autoloader
+   npm ci
+   npm run build
+   ```
+
+4. Run database setup, transfer existing SQLite rows, then create a unique admin account. The transfer command requires the PHP `pdo_pgsql` extension, an empty Supabase application schema, and the local SQLite file. It preserves IDs and foreign-key order, skips transient cache/session/queue tables, and leaves the SQLite database unchanged. First run its read-only dry run, inspect the counts, then run it again to copy:
+
+   ```sh
+   php artisan migrate --force
+   php artisan db:transfer-sqlite-to-supabase --dry-run
+   php artisan db:transfer-sqlite-to-supabase
+   php artisan storage:link
+   php artisan admin:create admin@your-domain.example "Admin Name"
+   ```
+
+   Run the transfer before creating the admin account. The command stops if Supabase application tables already contain rows. Database rows do not include uploaded file bytes; copy any files referenced by note/chapter records to the production file store separately. Do not run `db:seed` in production; it is intentionally blocked because it contains sample content. The admin command prompts securely for a password. Point the web server document root at Laravel's `public` directory, then cache configuration for production:
+
+   ```sh
+   php artisan optimize
+   ```
+
+5. Register Telegram's webhook once, after DNS and HTTPS are working:
+
+   ```sh
+   php artisan telegram:set-webhook https://your-domain.example/api/telegram/webhook
+   php artisan telegram:status
+   ```
+
+   Production webhook setup requires `TELEGRAM_WEBHOOK_SECRET`. Do not run `telegram:poll` while the webhook is active; only one update receiver may use the bot token at a time.
+
+6. Run Laravel's scheduler once per minute so activation reminders are sent:
+
+   ```cron
+   * * * * * cd /path/to/backend && php artisan schedule:run >> /dev/null 2>&1
+   ```
+
+## Checks before release
+
+```sh
+php artisan test
+npm run build
+php artisan route:list
+php artisan schedule:list
+```
+
+The app also provides `php artisan telegram:status` to check Telegram API connectivity and webhook status without printing the bot token.
