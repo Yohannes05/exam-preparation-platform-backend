@@ -1,0 +1,65 @@
+# Render Blueprint: Laravel API + Telegram bot web service.
+# Secrets (sync: false) are set in the Render dashboard / API, not in this file.
+services:
+  - type: web
+    name: exam-prep-backend
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    healthCheckPath: /up
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_URL
+        value: https://exam-prep-backend.onrender.com
+      - key: APP_KEY
+        sync: false
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_HOST
+        value: aws-0-eu-west-1.pooler.supabase.com
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_DATABASE
+        value: postgres
+      - key: DB_USERNAME
+        value: postgres.pfmstovmtsiashhyrvix
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSLMODE
+        value: require
+      - key: SESSION_DRIVER
+        value: database
+      - key: CACHE_STORE
+        value: database
+      - key: QUEUE_CONNECTION
+        value: database
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_USERNAME
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: TELEGRAM_ADMIN_CHAT_ID
+        sync: false
+      - key: TELEGRAPH_ACCESS_TOKEN
+        sync: false
+      - key: TELEGRAM_ACTIVATION_PRICE
+        sync: false
+      - key: TELEGRAM_TELEBIRR_NUMBER
+        sync: false
+      - key: TELEGRAM_CBE_ACCOUNT
+        sync: false
+      - key: TELEGRAM_CBE_ACCOUNT_NAME
+        sync: false
+      - key: TELEGRAM_SUPPORT_USERNAME
+        sync: false
+      - key: TELEGRAM_CHANNEL_USERNAME
+        sync: false
+      - key: TELEGRAM_CHANNEL_URL
+        sync: false

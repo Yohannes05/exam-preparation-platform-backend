@@ -18,6 +18,10 @@ return Application::configure(basePath: dirname(__DIR__))
             ->timezone('Africa/Addis_Ababa');
     })
     ->withMiddleware(function (Middleware $middleware): void {
+        // Render terminates TLS in front of the container; trust its proxies so
+        // request()->isSecure() and secure cookies work behind the load balancer.
+        $middleware->trustProxies(at: '*');
+
         // Same-origin browser calls to /api/* authenticate with the admin
         // session cookie (CSRF-protected) instead of a bearer token.
         $middleware->statefulApi();
