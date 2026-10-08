@@ -53,7 +53,9 @@ The local seeder adds sample curriculum, but does not create an admin with a def
    TELEGRAPH_ACCESS_TOKEN=...
    ```
 
-   Configure the channel, payment details, and database connection as needed. Use a durable database and storage volume. The scheduler and uploaded chapter PDFs need writable persistent storage.
+   Configure the channel, payment details, and database connection as needed. For Supabase Storage, create a **public** bucket named `lesson-files`, then set `SUPABASE_URL` and `SUPABASE_STORAGE_SERVICE_KEY` on Render. Find the server-side `service_role` key in Supabase project API settings; keep it only in Render secrets. Existing local files are not copied when database rows are transferred, so upload those files again after deploy.
+
+   The webhook secret is not provided by Telegram. Generate a random one in a terminal with `php -r 'echo bin2hex(random_bytes(32)), PHP_EOL;'`, then save the resulting 64-character value as `TELEGRAM_WEBHOOK_SECRET` in Render's **web service** Environment settings. Keep it private. The Render Blueprint also asks for it during initial setup.
 
 3. Install dependencies and build assets with Node.js 22.12 or later:
 
@@ -88,11 +90,9 @@ The local seeder adds sample curriculum, but does not create an admin with a def
 
    Production webhook setup requires `TELEGRAM_WEBHOOK_SECRET`. Do not run `telegram:poll` while the webhook is active; only one update receiver may use the bot token at a time.
 
-6. Run Laravel's scheduler once per minute so activation reminders are sent:
+6. The Render Blueprint defines a separate Cron service that runs `php artisan schedule:run` every minute. It shares the database and Telegram bot token with the web service; set the same `APP_KEY` and `DB_PASSWORD` for both services. Render Cron jobs are billed by run time with a $1/month minimum. The reminder task itself runs daily at 09:00 Addis Ababa time.
 
-   ```cron
-   * * * * * cd /path/to/backend && php artisan schedule:run >> /dev/null 2>&1
-   ```
+   If setting up the Cron service manually, use the same repository and Dockerfile, command `php artisan schedule:run`, and schedule `* * * * *` (UTC).
 
 ## Checks before release
 

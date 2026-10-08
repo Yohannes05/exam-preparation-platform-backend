@@ -15,7 +15,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule): void {
         $schedule->command('telegram:remind-expiring-activations')
             ->dailyAt('09:00')
-            ->timezone('Africa/Addis_Ababa');
+            ->timezone('Africa/Addis_Ababa')
+            ->withoutOverlapping(10);
     })
     ->withMiddleware(function (Middleware $middleware): void {
         // Render terminates TLS in front of the container; trust its proxies so

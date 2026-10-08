@@ -6,6 +6,14 @@ return [
         'access_token' => env('TELEGRAPH_ACCESS_TOKEN'),
     ],
 
+    'supabase' => [
+        'storage' => [
+            'url' => env('SUPABASE_URL'),
+            'bucket' => env('SUPABASE_STORAGE_BUCKET', 'lesson-files'),
+            'key' => env('SUPABASE_STORAGE_SERVICE_KEY'),
+        ],
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

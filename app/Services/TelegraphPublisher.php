@@ -4,12 +4,11 @@ namespace App\Services;
 
 use App\Models\Chapter;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 class TelegraphPublisher
 {
-    public function publish(Chapter $chapter): array
+    public function publish(Chapter $chapter, SupabasePublicStorage $files): array
     {
         $token = config('services.telegraph.access_token');
         if (! $token) throw new RuntimeException('Set TELEGRAPH_ACCESS_TOKEN in .env before publishing chapter notes.');
@@ -22,9 +21,7 @@ class TelegraphPublisher
             $content[] = ['tag' => 'h3', 'children' => [$note->title]];
             array_push($content, ...$this->htmlNodes($note->content));
             if ($note->image_file) {
-                $imageUrl = preg_match('~^https?://~i', $note->image_file)
-                    ? $note->image_file
-                    : url(Storage::disk('public')->url($note->image_file));
+                $imageUrl = $files->url($note->image_file);
                 $content[] = ['tag' => 'img', 'attrs' => ['src' => $imageUrl]];
             }
         }

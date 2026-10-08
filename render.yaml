@@ -63,3 +63,41 @@ services:
         sync: false
       - key: TELEGRAM_CHANNEL_URL
         sync: false
+      - key: SUPABASE_URL
+        value: https://pfmstovmtsiashhyrvix.supabase.co
+      - key: SUPABASE_STORAGE_BUCKET
+        value: lesson-files
+      - key: SUPABASE_STORAGE_SERVICE_KEY
+        sync: false
+  - type: cron
+    name: exam-prep-reminders
+    runtime: docker
+    region: frankfurt
+    branch: main
+    schedule: "* * * * *"
+    dockerCommand: php artisan schedule:run
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_KEY
+        sync: false
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_HOST
+        value: aws-0-eu-west-1.pooler.supabase.com
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_DATABASE
+        value: postgres
+      - key: DB_USERNAME
+        value: postgres.pfmstovmtsiashhyrvix
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSLMODE
+        value: require
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false

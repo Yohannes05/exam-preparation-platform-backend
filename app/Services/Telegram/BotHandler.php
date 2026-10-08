@@ -19,7 +19,6 @@ use App\Models\ChannelCheck;
 use App\Services\ExamService;
 use App\Services\ProgressService;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 
@@ -1308,9 +1307,7 @@ class BotHandler
 
     protected function publicFileUrl(string $path): string
     {
-        return str_starts_with($path, 'http://') || str_starts_with($path, 'https://')
-            ? $path
-            : Storage::disk('public')->url($path);
+        return app(\App\Services\SupabasePublicStorage::class)->url($path);
     }
 
     /* ------------------------------------------------------------------ */
